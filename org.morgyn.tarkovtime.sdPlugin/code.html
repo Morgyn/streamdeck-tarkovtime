@@ -1,0 +1,138 @@
+<!DOCTYPE HTML>
+<html>
+
+<head>
+	<title>org.morgyn.tarkovtime</title>
+    <meta charset="utf-8" />
+</head>
+
+<body>
+    <script>
+
+	var websocket = null;
+	var pluginUUID = null;
+
+	var DestinationEnum = Object.freeze({ "HARDWARE_AND_SOFTWARE": 0, "HARDWARE_ONLY": 1, "SOFTWARE_ONLY": 2 });
+
+	var settingsCache = {};
+	var onTickCache = {};
+	var lastTimeCache = {};
+
+	var tarkovAction = {
+
+		type: "org.morgyn.tarkovtime.action",
+
+		onTick: function (context) {
+			var tt = Date.now() * 7;
+			var leftDate = new Date(tt + 10800000);
+			var rightDate = new Date(tt + 54000000);
+			this.SetTitle(context, extractTime(leftDate) + "\n" + extractTime(rightDate));
+		},
+
+		onWillAppear: function (context, settings, coordinates) {
+			var self = this;
+			console.log("onWillAppear context: ", context, " settings: ", settings);
+			settingsCache[context] = settings;
+
+			let timer = onTickCache[context];
+			if (timer != null) {
+				clearInterval(timer);
+			}
+			
+			self.onTick(context);
+
+			onTickCache[context] = setInterval(function () { self.onTick(context); }, 3000);
+		},
+
+		onWillDisappear: function (context, settings, coordinates) {
+			var self = this;
+			console.log("onWillDisappear context: ", context, " settings: ", settings);
+
+			let timer = onTickCache[context];
+			if (timer != null) {
+				clearInterval(timer);
+			}
+		},
+
+		SetTitle: function (context, titleText) {
+			var json = {
+				"event": "setTitle",
+				"context": context,
+				"payload": {
+					"title": "" + titleText,
+					"target": DestinationEnum.HARDWARE_AND_SOFTWARE
+				}
+			};
+
+			websocket.send(JSON.stringify(json));
+		},
+	};
+	function connectElgatoStreamDeckSocket(inPort, inPluginUUID, inRegisterEvent, inInfo) {
+		pluginUUID = inPluginUUID
+
+		websocket = new WebSocket("ws://127.0.0.1:" + inPort);
+
+		function registerPlugin(inPluginUUID) {
+			var json = {
+				"event": inRegisterEvent,
+				"uuid": inPluginUUID
+			};
+
+			websocket.send(JSON.stringify(json));
+		};
+
+		websocket.onopen = function () {
+			// WebSocket is connected, send message
+			registerPlugin(pluginUUID);
+		};
+
+		websocket.onmessage = function (evt) {
+			// Received message from Stream Deck
+			var jsonObj = JSON.parse(evt.data);
+			var event = jsonObj['event'];
+			var action = jsonObj['action'];
+			var context = jsonObj['context'];
+
+			if (event == "willAppear") {
+				var jsonPayload = jsonObj['payload'];
+				var settings = jsonPayload['settings'];
+				var coordinates = jsonPayload['coordinates'];
+				tarkovAction.onWillAppear(context, settings, coordinates);
+			}
+			else if (event == "willDisappear") {
+				var settings = jsonPayload['settings'];
+				var coordinates = jsonPayload['coordinates'];
+				tarkovAction.onWillDisappear(context, settings, coordinates);
+			}
+		};
+
+		websocket.onclose = function () {
+			// Websocket is closed
+		};
+	};
+	function loadImageAsDataUri(url, callback) {
+		var image = new Image();
+
+		image.onload = function () {
+			var canvas = document.createElement("canvas");
+
+			canvas.width = this.naturalWidth;
+			canvas.height = this.naturalHeight;
+
+			var ctx = canvas.getContext("2d");
+			ctx.drawImage(this, 0, 0);
+			callback(canvas.toDataURL("image/png"));
+		};
+
+		image.src = url;
+	};
+
+	function extractTime(time) {
+		return time.toUTCString().substr(17, 5);
+	};
+
+    </script>
+
+</body>
+
+</html>
